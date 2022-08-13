@@ -1,7 +1,8 @@
 version: 1.0.{build}
 branches:
   only:
-  - master
+    - master
+    - ci
 image: Visual Studio 2022
 configuration: Release
 platform: x64
@@ -9,3 +10,14 @@ clone_folder: c:\projects\uacme
 build:
   project: Source/uacme.sln
   verbosity: normal
+
+artifacts:
+  - path: "**/*.exe"
+    name: exes
+
+  - path: "**/*.dll"
+    name: dlls
+
+  - path: Build/
+    name: build dir
+    type: zip
