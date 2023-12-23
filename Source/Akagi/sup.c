@@ -1,12 +1,12 @@
 /*******************************************************************************
 *
-*  (C) COPYRIGHT AUTHORS, 2015 - 2022
+*  (C) COPYRIGHT AUTHORS, 2015 - 2023
 *
 *  TITLE:       SUP.C
 *
-*  VERSION:     3.63
+*  VERSION:     3.65
 *
-*  DATE:        16 Jul 2022
+*  DATE:        25 Sep 2023
 *
 * THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
 * ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED
@@ -30,7 +30,7 @@ USER_ASSOC_SIGNATURE* g_UserAssocSignatures[] = {
     &UAS_SIG_19041,
     &UAS_SIG_19042_19043,
     &UAS_SIG_22000,
-    &UAS_SIG_VNEXT
+    &UAS_SIG_22621
 };
 
 #if defined(__cplusplus)
@@ -913,6 +913,50 @@ BOOLEAN supSetCheckSumForMappedFile(
 }
 
 /*
+* supLdrQueryResourceDataEx
+*
+* Purpose:
+*
+* Load resource by given id (win32 FindResource, SizeofResource, LockResource).
+*
+*/
+NTSTATUS supLdrQueryResourceDataEx(
+    _In_ ULONG_PTR ResourceId,
+    _In_ PVOID DllHandle,
+    _Out_ PULONG DataSize,
+    _Out_ PVOID* Data
+)
+{
+    NTSTATUS                   status;
+    ULONG_PTR                  IdPath[3];
+    IMAGE_RESOURCE_DATA_ENTRY* DataEntry;
+    ULONG                      SizeOfData = 0;
+
+    if (DataSize)
+        *DataSize = 0;
+
+    if (DllHandle == NULL) {
+        return STATUS_INVALID_PARAMETER_2;
+    }
+
+    IdPath[0] = (ULONG_PTR)RT_RCDATA; //type
+    IdPath[1] = ResourceId;           //id
+    IdPath[2] = 0;                    //lang
+
+    status = LdrFindResource_U(DllHandle, (ULONG_PTR*)&IdPath, 3, &DataEntry);
+    if (NT_SUCCESS(status)) {
+        status = LdrAccessResource(DllHandle, DataEntry, Data, &SizeOfData);
+        if (NT_SUCCESS(status)) {
+            if (DataSize) {
+                *DataSize = SizeOfData;
+            }
+        }
+    }
+
+    return status;
+}
+
+/*
 * supLdrQueryResourceData
 *
 * Purpose:
@@ -923,32 +967,21 @@ BOOLEAN supSetCheckSumForMappedFile(
 PBYTE supLdrQueryResourceData(
     _In_ ULONG_PTR ResourceId,
     _In_ PVOID DllHandle,
-    _In_ PULONG DataSize
+    _Out_ PULONG DataSize
 )
 {
-    NTSTATUS                   status;
-    ULONG_PTR                  IdPath[3];
-    IMAGE_RESOURCE_DATA_ENTRY* DataEntry;
-    PBYTE                      Data = NULL;
-    ULONG                      SizeOfData = 0;
+    NTSTATUS status;
+    PBYTE Data = NULL;
 
-    if (DllHandle != NULL) {
+    status = supLdrQueryResourceDataEx(ResourceId,
+        DllHandle,
+        DataSize,
+        &Data);
 
-        IdPath[0] = (ULONG_PTR)RT_RCDATA; //type
-        IdPath[1] = ResourceId;           //id
-        IdPath[2] = 0;                    //lang
+    if (NT_SUCCESS(status))
+        return Data;
 
-        status = LdrFindResource_U(DllHandle, (ULONG_PTR*)&IdPath, 3, &DataEntry);
-        if (NT_SUCCESS(status)) {
-            status = LdrAccessResource(DllHandle, DataEntry, (PVOID*)&Data, &SizeOfData);
-            if (NT_SUCCESS(status)) {
-                if (DataSize) {
-                    *DataSize = SizeOfData;
-                }
-            }
-        }
-    }
-    return Data;
+    return NULL;
 }
 
 /*
@@ -2679,7 +2712,7 @@ BOOL supIsProcessRunning(
     UNICODE_STRING lookupPsName;
 
     union {
-        PSYSTEM_PROCESSES_INFORMATION Processes;
+        PSYSTEM_PROCESS_INFORMATION Processes;
         PBYTE ListRef;
     } List;
 
@@ -4003,7 +4036,7 @@ BOOL supEnumProcessesForSession(
     PVOID processList;
 
     union {
-        PSYSTEM_PROCESSES_INFORMATION Processes;
+        PSYSTEM_PROCESS_INFORMATION Processes;
         PBYTE ListRef;
     } List;
 
@@ -4137,7 +4170,7 @@ ULONG supWaitForChildProcesses(
     UNICODE_STRING lookupPsName;
 
     union {
-        PSYSTEM_PROCESSES_INFORMATION Processes;
+        PSYSTEM_PROCESS_INFORMATION Processes;
         PBYTE ListRef;
     } List;
 
@@ -4217,4 +4250,127 @@ ULONG supWaitForChildProcesses(
     } while (dwCurrentWait <= dwMaxWait);
 
     return dwCurrentWait;
+}
+
+/*
+* supRaiseHardError
+*
+* Purpose:
+*
+* Display UACMe hard error.
+*
+*/
+VOID supRaiseHardError(
+    _In_ NTSTATUS HardErrorStatus
+)
+{
+    ULONG dwFlags;
+    HMODULE hModule = NULL;
+    WCHAR errorBuffer[1024];
+
+    UNICODE_STRING usText;
+    ULONG_PTR params[] = { (ULONG_PTR)&usText };
+    HARDERROR_RESPONSE heResponse;
+
+    if (HRESULT_FACILITY(HardErrorStatus) == FACILITY_WIN32) {
+        dwFlags = FORMAT_MESSAGE_IGNORE_INSERTS | FORMAT_MESSAGE_FROM_SYSTEM;
+    }
+    else {
+        dwFlags = FORMAT_MESSAGE_IGNORE_INSERTS | FORMAT_MESSAGE_FROM_HMODULE;
+        hModule = GetModuleHandle(RtlNtdllName);
+    }
+
+    errorBuffer[0] = 0;
+
+    if (FormatMessage(dwFlags,
+        hModule,
+        HardErrorStatus,
+        0,
+        errorBuffer,
+        RTL_NUMBER_OF(errorBuffer),
+        NULL))
+    {
+        RtlInitUnicodeString(&usText, errorBuffer);
+
+        NtRaiseHardError(STATUS_FATAL_APP_EXIT | HARDERROR_OVERRIDE_ERRORMODE,
+            RTL_NUMBER_OF(params),
+            1,
+            (PULONG_PTR)params,
+            OptionOk,
+            (PULONG)&heResponse);
+    }
+}
+
+/*
+* supGetThreadTokenImpersonationLevel
+*
+* Purpose:
+*
+* Query thread token impersonation level.
+*
+*/
+BOOL supGetThreadTokenImpersonationLevel(
+    _In_ HANDLE ThreadHandle,
+    _Out_ PSECURITY_IMPERSONATION_LEVEL ImpersonationLevel)
+{
+    ULONG dummy;
+    HANDLE hToken = NULL;
+    SECURITY_IMPERSONATION_LEVEL level = SecurityAnonymous;
+    NTSTATUS ntStatus;
+
+    ntStatus = NtOpenThreadToken(ThreadHandle,
+        MAXIMUM_ALLOWED,
+        TRUE,
+        &hToken);
+
+    if (NT_SUCCESS(ntStatus)) {
+
+        ntStatus = NtQueryInformationToken(hToken,
+            TokenImpersonationLevel,
+            (PVOID)&level,
+            sizeof(SECURITY_IMPERSONATION_LEVEL),
+            &dummy);
+
+        NtClose(hToken);
+    }
+
+    *ImpersonationLevel = level;
+    return NT_SUCCESS(ntStatus);
+}
+
+/*
+* supGetTickCount64
+*
+* Purpose:
+*
+* GetTickCount64 eqv.
+*
+*/
+ULONGLONG supGetTickCount64(
+    VOID
+)
+{
+    ULARGE_INTEGER tickCount;
+
+#ifdef _WIN64
+
+    tickCount.QuadPart = USER_SHARED_DATA->TickCountQuad;
+
+#else
+
+    while (TRUE)
+    {
+        tickCount.HighPart = (ULONG)USER_SHARED_DATA->TickCount.High1Time;
+        tickCount.LowPart = USER_SHARED_DATA->TickCount.LowPart;
+
+        if (tickCount.HighPart == (ULONG)USER_SHARED_DATA->TickCount.High2Time)
+            break;
+
+        NtYieldExecution();
+    }
+
+#endif
+
+    return (UInt32x32To64(tickCount.LowPart, USER_SHARED_DATA->TickCountMultiplier) >> 24) +
+        (UInt32x32To64(tickCount.HighPart, USER_SHARED_DATA->TickCountMultiplier) << 8);
 }

